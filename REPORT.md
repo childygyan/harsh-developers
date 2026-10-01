@@ -44,19 +44,33 @@ Interest slice is equal every month (₹1,000); balance starts at ₹112,000.
 - Unit tests: **15/15 passing** (`tests/emi.test.ts`, `tests/crypto.test.ts`) —
   both formulas verified against hand-computed values, schedule invariants
   (balances close to 0, principal sums to P, interest sums to total).
-- Typecheck: `astro check` — 0 errors.
-- Build: `astro build` — green.
-- Live HTTP checks: PLACEHOLDER (fill after deploy).
+- Typecheck: `astro check` — 0 errors (59 files).
+- Build: `astro build` — green; Tailwind utilities confirmed in the emitted CSS.
+- Live HTTP checks (read-only, 2026-10-01 ~08:23 UTC): `/` → **200**,
+  title "Properties | Harsh Developers", honest empty state
+  ("No properties listed yet" — no fake inventory).
+- ⚠️ **Authenticated end-to-end flows were NOT live-verified** (signup → apply →
+  admin approve → loan apply → admin approve with both interest types →
+  EMI schedules on both dashboards). The live verification step was declined
+  by the user, so these paths are verified by code review + unit tests only.
+  Recommend Firoz walks the flow once after seeding the admin account.
 
 ## Deploy details
 
-- Wrangler deployment id: PLACEHOLDER
-- D1 database: `harsh-developers-db` (id `5b8d5ae8-c55e-432f-b6bb-10e6b9ca3372`)
+- Cloudflare Pages deployment: `fbd9feac` → https://harsh-developers.pages.dev
+  (Pages project `harsh-developers`, branch `main`).
+- D1 database: `harsh-developers-db` (id `5b8d5ae8-c55e-432f-b6bb-10e6b9ca3372`);
+  schema applied incl. `interest_type` on loans; 0 users in production (clean).
 - R2 bucket: `harsh-developers-images` — ⚠️ NOT created: the Cloudflare API token
-  lacks R2 scope (D1 + Pages work). Image upload endpoints degrade honestly
-  ("Image storage is not configured") until the bucket exists.
-- GitHub commit: PLACEHOLDER
-- Drive zip: PLACEHOLDER
+  lacks R2 scope (verified 403 on bucket creation; D1 + Pages work). The R2
+  binding in `wrangler.toml` is temporarily commented out (deploy fails against
+  a nonexistent bucket); image upload endpoints degrade honestly
+  ("Image storage is not configured"). Re-enable by uncommenting the block
+  once the bucket exists.
+- GitHub commit: `612bfacdeb5690a9b516cd218c92817a3e69406a` on `main`
+  (repo `childygyan/harsh-developers`, created new today).
+- Drive: folder **'Harsh Developers'**, zip `harsh-developers-final-20261001.zip`
+  (157 KB, full source incl. REPORT.md).
 
 ## Admin seed instructions (for Firoz)
 
