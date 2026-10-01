@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.vercel/
+.output/
+
+# Wrangler
+.dev.vars
+.wrangler/
+
+# Env / secrets — NEVER commit real credentials
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+
+# Test artifacts
+coverage/

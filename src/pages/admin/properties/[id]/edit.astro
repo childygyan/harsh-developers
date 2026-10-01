@@ -1,0 +1,161 @@
+---
+/** Admin: edit a property — prefilled form, image management, add more images. */
+import Base from '../../../../layouts/Base.astro';
+import Notices from '../../../../layouts/Notices.astro';
+import { getDB } from '../../../../lib/db';
+
+interface PropertyRow {
+  id: string;
+  title: string;
+  type: string;
+  address: string;
+  area_sqft: number;
+  price_per_sqft: number;
+  total_price: number;
+  price_overridden: number;
+  description: string | null;
+  status: string;
+}
+interface ImageRow {
+  id: string;
+  r2_key: string;
+}
+
+const { id } = Astro.params;
+const db = getDB(Astro.locals);
+
+let property: PropertyRow | null = null;
+let images: ImageRow[] = [];
+if (db && id) {
+  property = (await db.prepare('SELECT * FROM properties WHERE id = ? LIMIT 1').bind(id).first<PropertyRow>()) ?? null;
+  if (property) {
+    images = (
+      await db
+        .prepare('SELECT id, r2_key FROM property_images WHERE property_id = ? ORDER BY sort_order')
+        .bind(property.id)
+        .all<ImageRow>()
+    ).results;
+  }
+}
+if (!property) {
+  Astro.response.status = 404;
+}
+
+const inputCls =
+  'mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500';
+---
+<Base title={property ? `Edit ${property.title}` : 'Property not found'}>
+  <div class="mx-auto max-w-2xl">
+    <a href="/admin/properties" class="text-sm text-slate-600 hover:text-slate-900">&larr; Back to properties</a>
+
+    {!db ? (
+      <div class="mt-4 rounded-xl border bg-white p-8 text-center shadow-sm">
+        <p class="font-medium text-slate-700">Database unavailable</p>
+        <p class="mt-1 text-sm text-slate-500">We could not load this property right now. Please try again later.</p>
+      </div>
+    ) : !property ? (
+      <div class="mt-4 rounded-xl border bg-white p-12 text-center shadow-sm">
+        <h1 class="text-2xl font-bold text-slate-900">Property not found</h1>
+        <p class="mt-2 text-sm text-slate-600">This property may have been deleted.</p>
+      </div>
+    ) : (
+      <div class="space-y-8">
+        <div class="mt-4 rounded-xl border bg-white p-8 shadow-sm">
+          <h1 class="text-2xl font-bold text-slate-900">Edit Property</h1>
+          <div class="mt-4"><Notices /></div>
+
+          <form method="post" action={`/api/admin/properties/${property.id}/update`} enctype="multipart/form-data" class="mt-2 space-y-5">
+            <div>
+              <label for="title" class="block text-sm font-medium text-slate-700">Title *</label>
+              <input id="title" name="title" type="text" required maxlength="200" value={property.title} class={inputCls} />
+            </div>
+
+            <div class="grid gap-5 sm:grid-cols-2">
+              <div>
+                <label for="type" class="block text-sm font-medium text-slate-700">Type *</label>
+                <select id="type" name="type" required class={inputCls}>
+                  <option value="gala" selected={property.type === 'gala'}>Gala (Shop / Commercial Unit)</option>
+                  <option value="plot" selected={property.type === 'plot'}>Plot</option>
+                  <option value="flat" selected={property.type === 'flat'}>Flat</option>
+                </select>
+              </div>
+              <div>
+                <label for="status" class="block text-sm font-medium text-slate-700">Status *</label>
+                <select id="status" name="status" required class={inputCls}>
+                  <option value="available" selected={property.status === 'available'}>Available</option>
+                  <option value="on-hold" selected={property.status === 'on-hold'}>On Hold</option>
+                  <option value="sold" selected={property.status === 'sold'}>Sold</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label for="address" class="block text-sm font-medium text-slate-700">Address / location *</label>
+              <input id="address" name="address" type="text" required maxlength="300" value={property.address} class={inputCls} />
+            </div>
+
+            <div class="grid gap-5 sm:grid-cols-3">
+              <div>
+                <label for="area_sqft" class="block text-sm font-medium text-slate-700">Area (sq ft) *</label>
+                <input id="area_sqft" name="area_sqft" type="number" min="0.01" step="0.01" required value={property.area_sqft} class={inputCls} />
+              </div>
+              <div>
+                <label for="price_per_sqft" class="block text-sm font-medium text-slate-700">Price per sq ft (₹) *</label>
+                <input id="price_per_sqft" name="price_per_sqft" type="number" min="0" step="0.01" required value={property.price_per_sqft} class={inputCls} />
+              </div>
+              <div>
+                <label for="total_price" class="block text-sm font-medium text-slate-700">Total price (₹)</label>
+                <input
+                  id="total_price" name="total_price" type="number" min="0.01" step="0.01"
+                  value={property.price_overridden === 1 ? property.total_price : ''}
+                  placeholder="Auto = area × rate"
+                  class={inputCls}
+                />
+              </div>
+            </div>
+            <p class="-mt-3 text-xs text-slate-500">Leave total price blank for auto = area &times; rate per sq ft.</p>
+
+            <div>
+              <label for="description" class="block text-sm font-medium text-slate-700">Description</label>
+              <textarea id="description" name="description" rows="4" maxlength="5000" class={inputCls}>{property.description ?? ''}</textarea>
+            </div>
+
+            <div>
+              <label for="images" class="block text-sm font-medium text-slate-700">Add more photos</label>
+              <input id="images" name="images" type="file" accept="image/*" multiple class={`${inputCls} file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white`} />
+              <p class="mt-1 text-xs text-slate-500">New photos are appended after the existing ones.</p>
+            </div>
+
+            <button type="submit" class="w-full rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
+              Save changes
+            </button>
+          </form>
+        </div>
+
+        <div class="rounded-xl border bg-white p-8 shadow-sm">
+          <h2 class="text-lg font-semibold text-slate-900">Photos ({images.length})</h2>
+          {images.length === 0 ? (
+            <p class="mt-3 text-sm text-slate-500">No photos yet. Use the form above to add some.</p>
+          ) : (
+            <div class="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3">
+              {images.map((img) => (
+                <div class="overflow-hidden rounded-lg border">
+                  <img src={`/img/${img.r2_key}`} alt={property.title} class="h-32 w-full object-cover" loading="lazy" />
+                  <form
+                    method="post"
+                    action={`/api/admin/properties/${property.id}/images/delete`}
+                    onsubmit="return confirm('Delete this photo?')"
+                    class="p-2 text-center"
+                  >
+                    <input type="hidden" name="image_id" value={img.id} />
+                    <button type="submit" class="text-xs font-medium text-red-600 hover:text-red-800">Delete photo</button>
+                  </form>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    )}
+  </div>
+</Base>

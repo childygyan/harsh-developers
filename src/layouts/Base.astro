@@ -1,0 +1,65 @@
+---
+/** Base layout: dark slate-900 header with amber-400 brand accent, footer, content slot. */
+interface Props {
+  title: string;
+  description?: string;
+}
+const { title, description } = Astro.props;
+const user = Astro.locals.user ?? null;
+const isAdmin = user?.role === 'admin';
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} | Harsh Developers</title>
+    {description && <meta name="description" content={description} />}
+  </head>
+  <body class="min-h-screen bg-slate-50 text-slate-900 flex flex-col antialiased">
+    <header class="bg-slate-900 text-white shadow">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+        <a href="/" class="text-xl font-bold tracking-tight">
+          <span class="text-amber-400">Harsh</span>
+          <span class="text-white">Developers</span>
+        </a>
+        <nav class="flex items-center gap-3 sm:gap-5 text-sm">
+          <a href="/" class="hover:text-amber-300 transition-colors">Properties</a>
+          {user && <a href="/dashboard" class="hover:text-amber-300 transition-colors">Dashboard</a>}
+          {isAdmin && <a href="/admin" class="hover:text-amber-300 transition-colors font-medium">Admin Panel</a>}
+          {user ? (
+            <span class="hidden sm:inline text-slate-300">Hi, {user.name}</span>
+            <form method="post" action="/api/auth/logout" class="inline">
+              <button
+                type="submit"
+                class="rounded-md border border-slate-600 px-3 py-1.5 hover:bg-slate-800 hover:text-amber-300 transition-colors"
+              >
+                Logout
+              </button>
+            </form>
+          ) : (
+            <a
+              href="/login"
+              class="rounded-md bg-amber-400 px-3 py-1.5 font-medium text-slate-900 hover:bg-amber-500 transition-colors"
+            >
+              Login
+            </a>
+          )}
+        </nav>
+      </div>
+    </header>
+
+    <main class="flex-1">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+        <slot />
+      </div>
+    </main>
+
+    <footer class="bg-slate-900 text-slate-400">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+        <p class="font-semibold text-slate-200">&copy; Harsh Developers</p>
+        <p class="mt-1 text-sm">Property listings &amp; loan management.</p>
+      </div>
+    </footer>
+  </body>
+</html>

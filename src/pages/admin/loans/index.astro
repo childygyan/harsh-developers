@@ -1,0 +1,113 @@
+---
+/** Admin: all loans table. */
+import Base from '../../../layouts/Base.astro';
+import Notices from '../../../layouts/Notices.astro';
+import StatusBadge from '../../../layouts/StatusBadge.astro';
+import { getDB } from '../../../lib/db';
+import { inr, inr0 } from '../../../lib/money';
+import { interestLabel } from '../../../lib/emi';
+
+interface LoanRow {
+  id: string;
+  amount: number;
+  tenure_months: number;
+  interest_pct: number | null;
+  interest_type: string;
+  status: string;
+  emi: number | null;
+  created_at: string;
+  borrower: string;
+  borrower_phone: string | null;
+  property_title: string | null;
+}
+
+const db = getDB(Astro.locals);
+let loans: LoanRow[] = [];
+if (db) {
+  loans = (
+    await db
+      .prepare(
+        `SELECT l.id, l.amount, l.tenure_months, l.interest_pct, l.interest_type, l.status, l.emi, l.created_at,
+                COALESCE(u.name, l.manual_name, '—') AS borrower,
+                COALESCE(u.phone, l.manual_phone) AS borrower_phone,
+                p.title AS property_title
+         FROM loans l
+         LEFT JOIN users u ON u.id = l.user_id
+         LEFT JOIN properties p ON p.id = l.property_id
+         ORDER BY l.created_at DESC`,
+      )
+      .all<LoanRow>()
+  ).results;
+}
+
+const fmtDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+---
+<Base title="Loans">
+  <Notices />
+
+  <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-bold text-slate-900">Loans</h1>
+      <p class="mt-1 text-sm text-slate-600">{loans.length} loan{loans.length === 1 ? '' : 's'} on record.</p>
+    </div>
+    <a
+      href="/admin/loans/new"
+      class="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+    >
+      ＋ New Manual Loan
+    </a>
+  </div>
+
+  {!db ? (
+    <div class="rounded-xl border bg-white p-8 text-center shadow-sm">
+      <p class="font-medium text-slate-700">Database unavailable</p>
+      <p class="mt-1 text-sm text-slate-500">We could not load the loans right now. Please try again later.</p>
+    </div>
+  ) : loans.length === 0 ? (
+    <div class="rounded-xl border bg-white p-12 text-center shadow-sm">
+      <p class="text-lg font-medium text-slate-700">No loans yet.</p>
+      <p class="mt-2 text-sm text-slate-500">User loan requests and manual loans will appear here.</p>
+    </div>
+  ) : (
+    <div class="overflow-x-auto rounded-xl border bg-white shadow-sm">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+            <th class="px-4 py-3">Borrower</th>
+            <th class="px-4 py-3">Property</th>
+            <th class="px-4 py-3 text-right">Amount</th>
+            <th class="px-4 py-3 text-right">Tenure</th>
+            <th class="px-4 py-3">Interest</th>
+            <th class="px-4 py-3">Status</th>
+            <th class="px-4 py-3 text-right">EMI</th>
+            <th class="px-4 py-3">Created</th>
+            <th class="px-4 py-3"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {loans.map((l, i) => (
+            <tr class={i % 2 === 1 ? 'bg-slate-50' : ''}>
+              <td class="px-4 py-3">
+                <p class="font-medium text-slate-900">{l.borrower}</p>
+                {l.borrower_phone && <p class="text-xs text-slate-500">{l.borrower_phone}</p>}
+              </td>
+              <td class="px-4 py-3 text-slate-600">{l.property_title || '—'}</td>
+              <td class="px-4 py-3 text-right font-medium text-slate-900">{inr0(l.amount)}</td>
+              <td class="px-4 py-3 text-right text-slate-600">{l.tenure_months} mo</td>
+              <td class="px-4 py-3 text-slate-600">
+                {l.status === 'pending' ? '—' : interestLabel(l.interest_pct, l.interest_type)}
+              </td>
+              <td class="px-4 py-3"><StatusBadge status={l.status} /></td>
+              <td class="px-4 py-3 text-right text-slate-600">{inr(l.emi)}</td>
+              <td class="px-4 py-3 text-slate-600">{fmtDate(l.created_at)}</td>
+              <td class="px-4 py-3 text-right">
+                <a href={`/admin/loans/${l.id}`} class="font-medium text-amber-600 hover:text-amber-700">Open</a>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )}
+</Base>

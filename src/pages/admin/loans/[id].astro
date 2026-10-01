@@ -1,0 +1,251 @@
+---
+/** Admin: loan detail — approve (interest % + type) / reject, or view schedule. */
+import Base from '../../../layouts/Base.astro';
+import Notices from '../../../layouts/Notices.astro';
+import StatusBadge from '../../../layouts/StatusBadge.astro';
+import { getDB } from '../../../lib/db';
+import { inr, inr0 } from '../../../lib/money';
+import { interestLabel } from '../../../lib/emi';
+
+interface LoanRow {
+  id: string;
+  amount: number;
+  tenure_months: number;
+  interest_pct: number | null;
+  interest_type: string;
+  status: string;
+  emi: number | null;
+  rejection_reason: string | null;
+  created_at: string;
+  decided_at: string | null;
+  borrower: string;
+  borrower_phone: string | null;
+  borrower_email: string | null;
+  property_title: string | null;
+  property_id: string | null;
+}
+interface SchedRow {
+  n: number;
+  due_date: string;
+  emi: number;
+  principal: number;
+  interest: number;
+  balance: number;
+}
+
+const { id } = Astro.params;
+const db = getDB(Astro.locals);
+
+let loan: LoanRow | null = null;
+let schedule: SchedRow[] = [];
+let defaultPct = '10';
+let defaultType = 'reducing';
+
+if (db && id) {
+  loan =
+    (await db
+      .prepare(
+        `SELECT l.id, l.amount, l.tenure_months, l.interest_pct, l.interest_type, l.status, l.emi,
+                l.rejection_reason, l.created_at, l.decided_at,
+                COALESCE(u.name, l.manual_name, '—') AS borrower,
+                COALESCE(u.phone, l.manual_phone) AS borrower_phone,
+                u.email AS borrower_email,
+                p.title AS property_title, p.id AS property_id
+         FROM loans l
+         LEFT JOIN users u ON u.id = l.user_id
+         LEFT JOIN properties p ON p.id = l.property_id
+         WHERE l.id = ? LIMIT 1`,
+      )
+      .bind(id)
+      .first<LoanRow>()) ?? null;
+
+  if (loan && loan.status === 'approved') {
+    schedule = (
+      await db
+        .prepare('SELECT n, due_date, emi, principal, interest, balance FROM emi_schedule WHERE loan_id = ? ORDER BY n')
+        .bind(loan.id)
+        .all<SchedRow>()
+    ).results;
+  }
+
+  const pctRow = await db.prepare("SELECT value FROM settings WHERE key = 'default_interest_pct' LIMIT 1").first<{ value: string }>();
+  const typeRow = await db.prepare("SELECT value FROM settings WHERE key = 'default_interest_type' LIMIT 1").first<{ value: string }>();
+  if (pctRow?.value) defaultPct = pctRow.value;
+  if (typeRow?.value === 'flat' || typeRow?.value === 'reducing') defaultType = typeRow.value;
+}
+if (!loan) {
+  Astro.response.status = 404;
+}
+
+const totalInterest = schedule.reduce((s, r) => s + r.interest, 0);
+const totalPayable = schedule.reduce((s, r) => s + r.emi, 0);
+const fmtDate = (iso: string) =>
+  new Date(iso + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+const fmtDateTime = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
+const inputCls =
+  'mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500';
+---
+<Base title={loan ? `Loan — ${loan.borrower}` : 'Loan not found'}>
+  <div class="mx-auto max-w-4xl">
+    <a href="/admin/loans" class="text-sm text-slate-600 hover:text-slate-900">&larr; Back to loans</a>
+    <div class="mt-4"><Notices /></div>
+
+    {!db ? (
+      <div class="rounded-xl border bg-white p-8 text-center shadow-sm">
+        <p class="font-medium text-slate-700">Database unavailable</p>
+        <p class="mt-1 text-sm text-slate-500">We could not load this loan right now. Please try again later.</p>
+      </div>
+    ) : !loan ? (
+      <div class="rounded-xl border bg-white p-12 text-center shadow-sm">
+        <h1 class="text-2xl font-bold text-slate-900">Loan not found</h1>
+        <p class="mt-2 text-sm text-slate-600">This loan may have been deleted.</p>
+      </div>
+    ) : (
+      <div class="space-y-8">
+        <div class="rounded-xl border bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h1 class="text-xl font-bold text-slate-900">Loan details</h1>
+            <StatusBadge status={loan.status} />
+          </div>
+          <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div>
+              <p class="text-xs text-slate-500">Borrower</p>
+              <p class="font-medium">{loan.borrower}</p>
+              {loan.borrower_phone && <p class="text-xs text-slate-500">{loan.borrower_phone}</p>}
+              {loan.borrower_email && <p class="text-xs text-slate-500">{loan.borrower_email}</p>}
+            </div>
+            <div>
+              <p class="text-xs text-slate-500">Property</p>
+              <p class="font-medium">
+                {loan.property_id ? <a href={`/properties/${loan.property_id}`} class="text-amber-600 hover:text-amber-700">{loan.property_title}</a> : '—'}
+              </p>
+            </div>
+            <div><p class="text-xs text-slate-500">Loan ID</p><p class="font-mono text-xs">{loan.id}</p></div>
+            <div><p class="text-xs text-slate-500">Amount</p><p class="font-medium">{inr0(loan.amount)}</p></div>
+            <div><p class="text-xs text-slate-500">Tenure</p><p class="font-medium">{loan.tenure_months} months</p></div>
+            <div><p class="text-xs text-slate-500">Requested</p><p class="font-medium">{fmtDateTime(loan.created_at)}</p></div>
+            {loan.status === 'approved' && (
+              <div><p class="text-xs text-slate-500">Monthly EMI</p><p class="font-medium">{inr(loan.emi)}</p></div>
+            )}
+            {loan.decided_at && (
+              <div><p class="text-xs text-slate-500">Decided</p><p class="font-medium">{fmtDateTime(loan.decided_at)}</p></div>
+            )}
+          </div>
+
+          {loan.status === 'approved' && (
+            <div>
+              <div class="mt-6 rounded-lg border border-amber-300 bg-amber-50 px-5 py-4 text-center">
+                <p class="text-xs uppercase tracking-wide text-amber-700">Interest rate</p>
+                <p class="mt-1 text-3xl font-bold text-slate-900">{interestLabel(loan.interest_pct, loan.interest_type)}</p>
+              </div>
+              {schedule.length > 0 && (
+                <div class="mt-6 grid gap-4 sm:grid-cols-3">
+                  <div class="rounded-lg bg-slate-50 px-4 py-3">
+                    <p class="text-xs text-slate-500">Total interest</p>
+                    <p class="text-lg font-bold text-slate-900">{inr(totalInterest)}</p>
+                  </div>
+                  <div class="rounded-lg bg-slate-50 px-4 py-3">
+                    <p class="text-xs text-slate-500">Total payable</p>
+                    <p class="text-lg font-bold text-slate-900">{inr(totalPayable)}</p>
+                  </div>
+                  <div class="rounded-lg bg-slate-50 px-4 py-3">
+                    <p class="text-xs text-slate-500">Installments</p>
+                    <p class="text-lg font-bold text-slate-900">{schedule.length}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {loan.status === 'rejected' && (
+            <div class="mt-6 rounded-md border border-red-200 bg-red-50 px-4 py-3">
+              <p class="text-sm font-medium text-red-800">Rejection reason</p>
+              <p class="mt-1 text-sm text-red-700">{loan.rejection_reason || 'No reason recorded.'}</p>
+            </div>
+          )}
+        </div>
+
+        {loan.status === 'pending' && (
+          <div class="grid gap-6 lg:grid-cols-2">
+            <div class="rounded-xl border bg-white p-6 shadow-sm">
+              <h2 class="text-lg font-semibold text-slate-900">Approve loan</h2>
+              <p class="mt-1 text-xs text-slate-500">Prefilled from Settings — you can set any % and type per loan.</p>
+              <form method="post" action="/api/admin/loans/decide" class="mt-4 space-y-4">
+                <input type="hidden" name="loan_id" value={loan.id} />
+                <input type="hidden" name="decision" value="approve" />
+                <div>
+                  <label for="interest_pct" class="block text-sm font-medium text-slate-700">Interest % p.a. *</label>
+                  <input id="interest_pct" name="interest_pct" type="number" min="0" max="100" step="0.01" required value={defaultPct} class={inputCls} />
+                </div>
+                <div>
+                  <span class="block text-sm font-medium text-slate-700">Interest type *</span>
+                  <div class="mt-2 flex gap-4">
+                    <label class="flex items-center gap-2 text-sm text-slate-700">
+                      <input type="radio" name="interest_type" value="reducing" checked={defaultType === 'reducing'} class="accent-amber-500" />
+                      Reducing
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-slate-700">
+                      <input type="radio" name="interest_type" value="flat" checked={defaultType === 'flat'} class="accent-amber-500" />
+                      Flat
+                    </label>
+                  </div>
+                </div>
+                <button type="submit" class="w-full rounded-md bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700">
+                  Approve loan
+                </button>
+              </form>
+            </div>
+
+            <div class="rounded-xl border bg-white p-6 shadow-sm">
+              <h2 class="text-lg font-semibold text-slate-900">Reject loan</h2>
+              <form method="post" action="/api/admin/loans/decide" class="mt-4 space-y-4">
+                <input type="hidden" name="loan_id" value={loan.id} />
+                <input type="hidden" name="decision" value="reject" />
+                <div>
+                  <label for="rejection_reason" class="block text-sm font-medium text-slate-700">Rejection reason *</label>
+                  <textarea id="rejection_reason" name="rejection_reason" rows="4" required maxlength="1000" placeholder="Reason shown to the borrower" class={inputCls}></textarea>
+                </div>
+                <button type="submit" class="w-full rounded-md bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700">
+                  Reject loan
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {loan.status === 'approved' && schedule.length > 0 && (
+          <div>
+            <h2 class="mb-4 text-lg font-semibold text-slate-900">EMI schedule</h2>
+            <div class="overflow-x-auto rounded-xl border bg-white shadow-sm">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                    <th class="px-4 py-3">#</th>
+                    <th class="px-4 py-3">Due date</th>
+                    <th class="px-4 py-3 text-right">EMI</th>
+                    <th class="px-4 py-3 text-right">Principal</th>
+                    <th class="px-4 py-3 text-right">Interest</th>
+                    <th class="px-4 py-3 text-right">Balance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {schedule.map((r, i) => (
+                    <tr class={i % 2 === 1 ? 'bg-slate-50' : ''}>
+                      <td class="px-4 py-2.5 text-slate-600">{r.n}</td>
+                      <td class="px-4 py-2.5 text-slate-600">{fmtDate(r.due_date)}</td>
+                      <td class="px-4 py-2.5 text-right font-medium">{inr(r.emi)}</td>
+                      <td class="px-4 py-2.5 text-right text-slate-600">{inr(r.principal)}</td>
+                      <td class="px-4 py-2.5 text-right text-slate-600">{inr(r.interest)}</td>
+                      <td class="px-4 py-2.5 text-right text-slate-600">{inr(r.balance)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    )}
+  </div>
+</Base>

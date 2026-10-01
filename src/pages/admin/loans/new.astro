@@ -1,0 +1,130 @@
+---
+/** Admin: create a manual loan for an existing user or an offline borrower. */
+import Base from '../../../layouts/Base.astro';
+import Notices from '../../../layouts/Notices.astro';
+import { getDB } from '../../../lib/db';
+import { inr0 } from '../../../lib/money';
+import { typeLabel } from '../../../lib/validation';
+
+interface UserRow {
+  id: string;
+  name: string;
+  email: string;
+}
+interface PropertyRow {
+  id: string;
+  title: string;
+  type: string;
+}
+
+const db = getDB(Astro.locals);
+let users: UserRow[] = [];
+let properties: PropertyRow[] = [];
+let defaultPct = '10';
+let defaultType = 'reducing';
+
+if (db) {
+  users = (await db.prepare('SELECT id, name, email FROM users ORDER BY name').all<UserRow>()).results;
+  properties = (await db.prepare('SELECT id, title, type FROM properties ORDER BY created_at DESC').all<PropertyRow>()).results;
+  const pctRow = await db.prepare("SELECT value FROM settings WHERE key = 'default_interest_pct' LIMIT 1").first<{ value: string }>();
+  const typeRow = await db.prepare("SELECT value FROM settings WHERE key = 'default_interest_type' LIMIT 1").first<{ value: string }>();
+  if (pctRow?.value) defaultPct = pctRow.value;
+  if (typeRow?.value === 'flat' || typeRow?.value === 'reducing') defaultType = typeRow.value;
+}
+
+const inputCls =
+  'mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500';
+---
+<Base title="New Manual Loan">
+  <div class="mx-auto max-w-2xl">
+    <a href="/admin/loans" class="text-sm text-slate-600 hover:text-slate-900">&larr; Back to loans</a>
+    <div class="mt-4 rounded-xl border bg-white p-8 shadow-sm">
+      <h1 class="text-2xl font-bold text-slate-900">New Manual Loan</h1>
+      <p class="mt-1 text-sm text-slate-600">Record a loan directly — for a registered user or an offline borrower.</p>
+      <div class="mt-4"><Notices /></div>
+
+      {!db ? (
+        <div class="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          Database unavailable. Please try again later.
+        </div>
+      ) : (
+        <form method="post" action="/api/admin/loans/manual" class="mt-2 space-y-6">
+          <fieldset class="rounded-lg border border-slate-200 p-4">
+            <legend class="px-2 text-sm font-semibold text-slate-700">Borrower — fill either option</legend>
+            <div class="space-y-4">
+              <div>
+                <label for="user_id" class="block text-sm font-medium text-slate-700">Existing user</label>
+                <select id="user_id" name="user_id" class={inputCls}>
+                  <option value="">— Select a registered user —</option>
+                  {users.map((u) => (
+                    <option value={u.id}>{u.name} ({u.email})</option>
+                  ))}
+                </select>
+              </div>
+              <div class="flex items-center gap-3 text-xs text-slate-400">
+                <span class="h-px flex-1 bg-slate-200"></span> or <span class="h-px flex-1 bg-slate-200"></span>
+              </div>
+              <div class="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label for="manual_name" class="block text-sm font-medium text-slate-700">Borrower name (manual)</label>
+                  <input id="manual_name" name="manual_name" type="text" maxlength="120" placeholder="e.g. Ramesh Patel" class={inputCls} />
+                </div>
+                <div>
+                  <label for="manual_phone" class="block text-sm font-medium text-slate-700">Borrower phone (manual)</label>
+                  <input id="manual_phone" name="manual_phone" type="tel" maxlength="30" placeholder="e.g. 98765 43210" class={inputCls} />
+                </div>
+              </div>
+            </div>
+          </fieldset>
+
+          <div>
+            <label for="property_id" class="block text-sm font-medium text-slate-700">Property (optional)</label>
+            <select id="property_id" name="property_id" class={inputCls}>
+              <option value="">— No property linked —</option>
+              {properties.map((p) => (
+                <option value={p.id}>{p.title} — {typeLabel(p.type)}</option>
+              ))}
+            </select>
+            <p class="mt-1 text-xs text-slate-500">Link the loan to a listed property, or leave blank.</p>
+          </div>
+
+          <div class="grid gap-5 sm:grid-cols-2">
+            <div>
+              <label for="amount" class="block text-sm font-medium text-slate-700">Loan amount (₹) *</label>
+              <input id="amount" name="amount" type="number" min="1" step="0.01" required placeholder="e.g. 500000" class={inputCls} />
+            </div>
+            <div>
+              <label for="tenure_months" class="block text-sm font-medium text-slate-700">Tenure (months) *</label>
+              <input id="tenure_months" name="tenure_months" type="number" min="1" max="360" required placeholder="e.g. 60" class={inputCls} />
+            </div>
+          </div>
+
+          <div class="grid gap-5 sm:grid-cols-2">
+            <div>
+              <label for="interest_pct" class="block text-sm font-medium text-slate-700">Interest % p.a. *</label>
+              <input id="interest_pct" name="interest_pct" type="number" min="0" max="100" step="0.01" required value={defaultPct} class={inputCls} />
+            </div>
+            <div>
+              <span class="block text-sm font-medium text-slate-700">Interest type *</span>
+              <div class="mt-2 flex gap-4">
+                <label class="flex items-center gap-2 text-sm text-slate-700">
+                  <input type="radio" name="interest_type" value="reducing" checked={defaultType === 'reducing'} class="accent-amber-500" />
+                  Reducing
+                </label>
+                <label class="flex items-center gap-2 text-sm text-slate-700">
+                  <input type="radio" name="interest_type" value="flat" checked={defaultType === 'flat'} class="accent-amber-500" />
+                  Flat
+                </label>
+              </div>
+            </div>
+          </div>
+          <p class="-mt-3 text-xs text-slate-500">Prefilled from Settings — you can still set any % and type per loan.</p>
+
+          <button type="submit" class="w-full rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
+            Create loan
+          </button>
+        </form>
+      )}
+    </div>
+  </div>
+</Base>

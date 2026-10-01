@@ -1,0 +1,123 @@
+---
+/** Home — property listing with type filter. */
+import Base from '../layouts/Base.astro';
+import Notices from '../layouts/Notices.astro';
+import StatusBadge from '../layouts/StatusBadge.astro';
+import { getDB } from '../lib/db';
+import { inr0 } from '../lib/money';
+import { typeLabel } from '../lib/validation';
+
+interface PropertyRow {
+  id: string;
+  title: string;
+  type: string;
+  address: string;
+  area_sqft: number;
+  price_per_sqft: number;
+  total_price: number;
+  status: string;
+  img: string | null;
+}
+
+const typeFilter = Astro.url.searchParams.get('type');
+const validTypes = ['gala', 'plot', 'flat'];
+const activeType = typeFilter && validTypes.includes(typeFilter) ? typeFilter : null;
+
+const db = getDB(Astro.locals);
+let properties: PropertyRow[] = [];
+if (db) {
+  const sql = activeType
+    ? `SELECT p.id, p.title, p.type, p.address, p.area_sqft, p.price_per_sqft, p.total_price, p.status,
+              (SELECT r2_key FROM property_images WHERE property_id = p.id ORDER BY sort_order LIMIT 1) AS img
+       FROM properties p WHERE p.type = ? ORDER BY p.created_at DESC`
+    : `SELECT p.id, p.title, p.type, p.address, p.area_sqft, p.price_per_sqft, p.total_price, p.status,
+              (SELECT r2_key FROM property_images WHERE property_id = p.id ORDER BY sort_order LIMIT 1) AS img
+       FROM properties p ORDER BY p.created_at DESC`;
+  const stmt = db.prepare(sql);
+  const res = activeType ? await stmt.bind(activeType).all<PropertyRow>() : await stmt.all<PropertyRow>();
+  properties = res.results;
+}
+
+const filters = [
+  { key: null, label: 'All' },
+  { key: 'gala', label: 'Gala' },
+  { key: 'plot', label: 'Plot' },
+  { key: 'flat', label: 'Flat' },
+];
+---
+<Base title="Properties" description="Browse available galas, plots and flats from Harsh Developers.">
+  <Notices />
+
+  <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-bold text-slate-900">Properties</h1>
+      <p class="mt-1 text-sm text-slate-600">Galas, plots and flats listed by Harsh Developers.</p>
+    </div>
+    <div class="flex gap-2">
+      {filters.map((f) => {
+        const isActive = f.key === activeType;
+        const href = f.key ? `/?type=${f.key}` : '/';
+        return (
+          <a
+            href={href}
+            class={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
+              isActive
+                ? 'border-slate-900 bg-slate-900 text-white'
+                : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400'
+            }`}
+          >
+            {f.label}
+          </a>
+        );
+      })}
+    </div>
+  </div>
+
+  {!db ? (
+    <div class="rounded-xl border bg-white p-8 text-center shadow-sm">
+      <p class="text-slate-700 font-medium">Database unavailable</p>
+      <p class="mt-1 text-sm text-slate-500">We could not load the property listings right now. Please try again later.</p>
+    </div>
+  ) : properties.length === 0 ? (
+    <div class="rounded-xl border bg-white p-12 text-center shadow-sm">
+      <p class="text-lg font-medium text-slate-700">No properties listed yet — check back soon.</p>
+      <p class="mt-2 text-sm text-slate-500">New galas, plots and flats will appear here as they are added.</p>
+    </div>
+  ) : (
+    <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+      {properties.map((p) => (
+        <a
+          href={`/properties/${p.id}`}
+          class="group overflow-hidden rounded-xl border bg-white shadow-sm transition-shadow hover:shadow-md"
+        >
+          {p.img ? (
+            <img src={`/img/${p.img}`} alt={p.title} class="h-48 w-full object-cover" loading="lazy" />
+          ) : (
+            <div class="flex h-48 w-full items-center justify-center bg-slate-200 text-slate-400">
+              <span class="text-sm font-medium">No photo available</span>
+            </div>
+          )}
+          <div class="p-5">
+            <div class="mb-2 flex items-center gap-2">
+              <span class="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">
+                {typeLabel(p.type)}
+              </span>
+              <StatusBadge status={p.status} />
+            </div>
+            <h2 class="text-lg font-semibold text-slate-900 group-hover:text-slate-700">{p.title}</h2>
+            <p class="mt-1 text-sm text-slate-600">{p.address}</p>
+            <div class="mt-4 flex items-end justify-between border-t border-slate-100 pt-4">
+              <div>
+                <p class="text-xs text-slate-500">
+                  {Number(p.area_sqft).toLocaleString('en-IN')} sq ft &middot; {inr0(p.price_per_sqft)}/sq ft
+                </p>
+                <p class="text-xl font-bold text-slate-900">{inr0(p.total_price)}</p>
+              </div>
+              <span class="text-sm font-medium text-amber-600 group-hover:text-amber-700">View &rarr;</span>
+            </div>
+          </div>
+        </a>
+      ))}
+    </div>
+  )}
+</Base>

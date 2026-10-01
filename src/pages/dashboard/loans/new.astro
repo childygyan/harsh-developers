@@ -1,0 +1,95 @@
+---
+/** Apply for a loan against an approved application. */
+import Base from '../../../layouts/Base.astro';
+import Notices from '../../../layouts/Notices.astro';
+import { getDB } from '../../../lib/db';
+import { inr0 } from '../../../lib/money';
+import { typeLabel } from '../../../lib/validation';
+
+interface AppRow {
+  id: string;
+  status: string;
+  property_title: string;
+  property_type: string;
+  property_price: number;
+}
+
+const user = Astro.locals.user;
+if (!user) {
+  return Astro.redirect('/login?next=' + encodeURIComponent(Astro.url.pathname + Astro.url.search));
+}
+
+const applicationId = Astro.url.searchParams.get('application_id') ?? '';
+const db = getDB(Astro.locals);
+
+let app: AppRow | null = null;
+let loadError: string | null = null;
+
+if (!db) {
+  loadError = 'Database unavailable. Please try again later.';
+} else if (!applicationId) {
+  loadError = 'No application selected. Pick an approved application from your dashboard first.';
+} else {
+  app =
+    (await db
+      .prepare(
+        `SELECT a.id, a.status, p.title AS property_title, p.type AS property_type, p.total_price AS property_price
+         FROM applications a JOIN properties p ON p.id = a.property_id
+         WHERE a.id = ? AND a.user_id = ? LIMIT 1`,
+      )
+      .bind(applicationId, user.id)
+      .first<AppRow>()) ?? null;
+  if (!app) {
+    loadError = 'Application not found.';
+  } else if (app.status !== 'approved') {
+    loadError = 'You can apply for a loan only after your application is approved.';
+  }
+}
+---
+<Base title="Apply for Loan">
+  <div class="mx-auto max-w-lg">
+    <a href="/dashboard" class="text-sm text-slate-600 hover:text-slate-900">&larr; Back to dashboard</a>
+    <div class="mt-4 rounded-xl border bg-white p-8 shadow-sm">
+      <h1 class="text-2xl font-bold text-slate-900">Apply for Loan</h1>
+      <div class="mt-4"><Notices /></div>
+
+      {loadError ? (
+        <div class="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{loadError}</div>
+      ) : app ? (
+        <div>
+          <div class="rounded-md bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <p><span class="text-slate-500">Property:</span> <span class="font-medium">{app.property_title}</span></p>
+            <p class="mt-1"><span class="text-slate-500">Type:</span> {typeLabel(app.property_type)}</p>
+            <p class="mt-1"><span class="text-slate-500">Property price:</span> <span class="font-medium">{inr0(app.property_price)}</span></p>
+          </div>
+          <form method="post" action="/api/loans/apply" class="mt-6 space-y-4">
+            <input type="hidden" name="application_id" value={app.id} />
+            <div>
+              <label for="amount" class="block text-sm font-medium text-slate-700">Loan amount (₹)</label>
+              <input
+                id="amount" name="amount" type="number" min="1" max="1000000000" step="0.01" required
+                placeholder="e.g. 500000"
+                class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+              />
+            </div>
+            <div>
+              <label for="tenure_months" class="block text-sm font-medium text-slate-700">Tenure (months)</label>
+              <input
+                id="tenure_months" name="tenure_months" type="number" min="1" max="360" required
+                placeholder="e.g. 60"
+                class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+              />
+              <p class="mt-1 text-xs text-slate-500">Between 1 and 360 months. The interest rate is set by the admin when your loan is approved.</p>
+            </div>
+            <button
+              type="submit"
+              class="w-full rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+            >
+              Submit loan application
+            </button>
+          </form>
+        </div>
+      ) : null}
+    </div>
+  </div>
+</Base>

@@ -1,0 +1,37 @@
+---
+/**
+ * Error / success banners driven by URL query params.
+ * - `error`  → red banner with the message as-is.
+ * - created|deleted|saved|applied|decided|notice → green banner with a friendly message.
+ */
+const params = Astro.url.searchParams;
+const error = params.get('error');
+
+const friendly: Record<string, (v: string) => string> = {
+  created: () => 'Created successfully.',
+  deleted: () => 'Deleted successfully.',
+  saved: () => 'Settings saved successfully.',
+  applied: () => 'Submitted successfully. You can track it below.',
+  decided: () => 'Decision recorded successfully.',
+  notice: (v) => v || 'Done.',
+};
+
+let success: string | null = null;
+for (const key of Object.keys(friendly)) {
+  const v = params.get(key);
+  if (v !== null) {
+    success = friendly[key](v);
+    break;
+  }
+}
+---
+{error && (
+  <div role="alert" class="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+    {error}
+  </div>
+)}
+{!error && success && (
+  <div role="status" class="mb-6 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+    {success}
+  </div>
+)}

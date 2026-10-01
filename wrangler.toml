@@ -1,0 +1,23 @@
+# Cloudflare Pages configuration for Harsh Developers.
+# database_id is filled in after `wrangler d1 create harsh-developers-db`.
+name = "harsh-developers"
+compatibility_date = "2026-09-01"
+pages_build_output_dir = "./dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "harsh-developers-db"
+database_id = "5b8d5ae8-c55e-432f-b6bb-10e6b9ca3372"
+
+# R2 bucket for property images — TEMPORARILY DISABLED 2026-10-01:
+# the Cloudflare API token lacks R2 scope so the bucket
+# 'harsh-developers-images' could not be created yet (deploy fails if the
+# binding points at a nonexistent bucket). Image upload endpoints degrade
+# honestly ("Image storage is not configured") until the bucket exists.
+# RE-ENABLE by uncommenting the block below once the bucket is created.
+# [[r2_buckets]]
+# binding = "IMAGES"
+# bucket_name = "harsh-developers-images"
+
+[vars]
+ENVIRONMENT = "production"

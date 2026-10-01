@@ -1,0 +1,172 @@
+---
+/** Loan detail for the borrower: summary + full EMI schedule. */
+import Base from '../../../layouts/Base.astro';
+import Notices from '../../../layouts/Notices.astro';
+import StatusBadge from '../../../layouts/StatusBadge.astro';
+import { getDB } from '../../../lib/db';
+import { inr, inr0 } from '../../../lib/money';
+import { interestLabel } from '../../../lib/emi';
+
+interface LoanRow {
+  id: string;
+  user_id: string | null;
+  amount: number;
+  tenure_months: number;
+  interest_pct: number | null;
+  interest_type: string;
+  status: string;
+  emi: number | null;
+  rejection_reason: string | null;
+  created_at: string;
+  property_title: string | null;
+}
+interface SchedRow {
+  n: number;
+  due_date: string;
+  emi: number;
+  principal: number;
+  interest: number;
+  balance: number;
+}
+
+const { id } = Astro.params;
+const user = Astro.locals.user;
+if (!user) {
+  return Astro.redirect('/login?next=' + encodeURIComponent(Astro.url.pathname));
+}
+
+const db = getDB(Astro.locals);
+let loan: LoanRow | null = null;
+let schedule: SchedRow[] = [];
+
+if (db && id) {
+  loan =
+    (await db
+      .prepare(
+        `SELECT l.*, p.title AS property_title FROM loans l LEFT JOIN properties p ON p.id = l.property_id
+         WHERE l.id = ? LIMIT 1`,
+      )
+      .bind(id)
+      .first<LoanRow>()) ?? null;
+  if (loan && loan.user_id === user.id && loan.status === 'approved') {
+    schedule = (
+      await db
+        .prepare('SELECT n, due_date, emi, principal, interest, balance FROM emi_schedule WHERE loan_id = ? ORDER BY n')
+        .bind(loan.id)
+        .all<SchedRow>()
+    ).results;
+  }
+}
+
+if (!loan || loan.user_id !== user.id) {
+  Astro.response.status = 404;
+}
+
+const totalInterest = schedule.reduce((s, r) => s + r.interest, 0);
+const totalPayable = schedule.reduce((s, r) => s + r.emi, 0);
+const fmtDate = (iso: string) =>
+  new Date(iso + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+---
+<Base title={loan ? `Loan ${loan.id}` : 'Loan not found'}>
+  <div class="mx-auto max-w-4xl">
+    <a href="/dashboard" class="text-sm text-slate-600 hover:text-slate-900">&larr; Back to dashboard</a>
+    <div class="mt-4"><Notices /></div>
+
+    {!db ? (
+      <div class="rounded-xl border bg-white p-8 text-center shadow-sm">
+        <p class="font-medium text-slate-700">Database unavailable</p>
+        <p class="mt-1 text-sm text-slate-500">We could not load this loan right now. Please try again later.</p>
+      </div>
+    ) : !loan || loan.user_id !== user.id ? (
+      <div class="rounded-xl border bg-white p-12 text-center shadow-sm">
+        <h1 class="text-2xl font-bold text-slate-900">Loan not found</h1>
+        <p class="mt-2 text-sm text-slate-600">This loan does not exist or does not belong to you.</p>
+      </div>
+    ) : (
+      <div class="space-y-8">
+        <div class="rounded-xl border bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h1 class="text-xl font-bold text-slate-900">Loan details</h1>
+            <StatusBadge status={loan.status} />
+          </div>
+          <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div><p class="text-xs text-slate-500">Loan ID</p><p class="font-mono text-xs">{loan.id}</p></div>
+            <div><p class="text-xs text-slate-500">Property</p><p class="font-medium">{loan.property_title || '—'}</p></div>
+            <div><p class="text-xs text-slate-500">Loan amount</p><p class="font-medium">{inr0(loan.amount)}</p></div>
+            <div><p class="text-xs text-slate-500">Tenure</p><p class="font-medium">{loan.tenure_months} months</p></div>
+            <div><p class="text-xs text-slate-500">Monthly EMI</p><p class="font-medium">{inr(loan.emi)}</p></div>
+          </div>
+
+          {loan.status === 'approved' && (
+            <div class="mt-6 rounded-lg border border-amber-300 bg-amber-50 px-5 py-4 text-center">
+              <p class="text-xs uppercase tracking-wide text-amber-700">Interest rate</p>
+              <p class="mt-1 text-3xl font-bold text-slate-900">{interestLabel(loan.interest_pct, loan.interest_type)}</p>
+            </div>
+          )}
+
+          {loan.status === 'approved' && schedule.length > 0 && (
+            <div class="mt-6 grid gap-4 sm:grid-cols-3">
+              <div class="rounded-lg bg-slate-50 px-4 py-3">
+                <p class="text-xs text-slate-500">Total interest</p>
+                <p class="text-lg font-bold text-slate-900">{inr(totalInterest)}</p>
+              </div>
+              <div class="rounded-lg bg-slate-50 px-4 py-3">
+                <p class="text-xs text-slate-500">Total payable</p>
+                <p class="text-lg font-bold text-slate-900">{inr(totalPayable)}</p>
+              </div>
+              <div class="rounded-lg bg-slate-50 px-4 py-3">
+                <p class="text-xs text-slate-500">Installments</p>
+                <p class="text-lg font-bold text-slate-900">{schedule.length}</p>
+              </div>
+            </div>
+          )}
+
+          {loan.status === 'rejected' && loan.rejection_reason && (
+            <div class="mt-6 rounded-md border border-red-200 bg-red-50 px-4 py-3">
+              <p class="text-sm font-medium text-red-800">Rejection reason</p>
+              <p class="mt-1 text-sm text-red-700">{loan.rejection_reason}</p>
+            </div>
+          )}
+
+          {loan.status === 'pending' && (
+            <p class="mt-6 rounded-md bg-slate-100 px-4 py-3 text-sm text-slate-600">
+              Your loan application is under review. The interest rate and EMI schedule will appear here once approved.
+            </p>
+          )}
+        </div>
+
+        {loan.status === 'approved' && schedule.length > 0 && (
+          <div>
+            <h2 class="mb-4 text-lg font-semibold text-slate-900">EMI schedule</h2>
+            <div class="overflow-x-auto rounded-xl border bg-white shadow-sm">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                    <th class="px-4 py-3">#</th>
+                    <th class="px-4 py-3">Due date</th>
+                    <th class="px-4 py-3 text-right">EMI</th>
+                    <th class="px-4 py-3 text-right">Principal</th>
+                    <th class="px-4 py-3 text-right">Interest</th>
+                    <th class="px-4 py-3 text-right">Balance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {schedule.map((r, i) => (
+                    <tr class={i % 2 === 1 ? 'bg-slate-50' : ''}>
+                      <td class="px-4 py-2.5 text-slate-600">{r.n}</td>
+                      <td class="px-4 py-2.5 text-slate-600">{fmtDate(r.due_date)}</td>
+                      <td class="px-4 py-2.5 text-right font-medium">{inr(r.emi)}</td>
+                      <td class="px-4 py-2.5 text-right text-slate-600">{inr(r.principal)}</td>
+                      <td class="px-4 py-2.5 text-right text-slate-600">{inr(r.interest)}</td>
+                      <td class="px-4 py-2.5 text-right text-slate-600">{inr(r.balance)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    )}
+  </div>
+</Base>

@@ -1,0 +1,203 @@
+---
+/** Property detail: gallery, price breakdown, description, apply CTA. */
+import Base from '../../layouts/Base.astro';
+import Notices from '../../layouts/Notices.astro';
+import StatusBadge from '../../layouts/StatusBadge.astro';
+import { getDB } from '../../lib/db';
+import { inr0 } from '../../lib/money';
+import { typeLabel } from '../../lib/validation';
+
+interface PropertyRow {
+  id: string;
+  title: string;
+  type: string;
+  address: string;
+  area_sqft: number;
+  price_per_sqft: number;
+  total_price: number;
+  price_overridden: number;
+  description: string | null;
+  status: string;
+}
+interface ImageRow {
+  id: string;
+  r2_key: string;
+}
+interface AppRow {
+  id: string;
+  status: string;
+}
+
+const { id } = Astro.params;
+const user = Astro.locals.user ?? null;
+const db = getDB(Astro.locals);
+
+let property: PropertyRow | null = null;
+let images: ImageRow[] = [];
+let existingApp: AppRow | null = null;
+
+if (db && id) {
+  property =
+    (await db.prepare('SELECT * FROM properties WHERE id = ? LIMIT 1').bind(id).first<PropertyRow>()) ?? null;
+  if (property) {
+    images = (
+      await db
+        .prepare('SELECT id, r2_key FROM property_images WHERE property_id = ? ORDER BY sort_order')
+        .bind(property.id)
+        .all<ImageRow>()
+    ).results;
+    if (user) {
+      existingApp =
+        (await db
+          .prepare('SELECT id, status FROM applications WHERE user_id = ? AND property_id = ? LIMIT 1')
+          .bind(user.id, property.id)
+          .first<AppRow>()) ?? null;
+    }
+  }
+}
+
+if (!property) {
+  Astro.response.status = 404;
+}
+
+const nextParam = encodeURIComponent(`/properties/${id ?? ''}`);
+const canApply = user && property && property.status === 'available' && !existingApp;
+---
+<Base title={property ? property.title : 'Property not found'}>
+  <Notices />
+
+  {!db ? (
+    <div class="rounded-xl border bg-white p-8 text-center shadow-sm">
+      <p class="font-medium text-slate-700">Database unavailable</p>
+      <p class="mt-1 text-sm text-slate-500">We could not load this property right now. Please try again later.</p>
+    </div>
+  ) : !property ? (
+    <div class="rounded-xl border bg-white p-12 text-center shadow-sm">
+      <h1 class="text-2xl font-bold text-slate-900">Property not found</h1>
+      <p class="mt-2 text-sm text-slate-600">This listing may have been removed.</p>
+      <a href="/" class="mt-4 inline-block rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+        Back to properties
+      </a>
+    </div>
+  ) : (
+    <div>
+      <a href="/" class="text-sm text-slate-600 hover:text-slate-900">&larr; All properties</a>
+
+      <div class="mt-4 grid gap-8 lg:grid-cols-2">
+        <div>
+          {images.length > 0 ? (
+            <div>
+              <img
+                src={`/img/${images[0].r2_key}`}
+                alt={property.title}
+                class="h-80 w-full rounded-xl border object-cover shadow-sm"
+              />
+              {images.length > 1 && (
+                <div class="mt-3 grid grid-cols-4 gap-3">
+                  {images.slice(1).map((img) => (
+                    <img
+                      src={`/img/${img.r2_key}`}
+                      alt={property.title}
+                      class="h-20 w-full rounded-lg border object-cover"
+                      loading="lazy"
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div class="flex h-80 w-full items-center justify-center rounded-xl border bg-slate-200 text-slate-400">
+              <span class="text-sm font-medium">No photos available for this property</span>
+            </div>
+          )}
+        </div>
+
+        <div>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">
+              {typeLabel(property.type)}
+            </span>
+            <StatusBadge status={property.status} />
+          </div>
+          <h1 class="mt-3 text-3xl font-bold text-slate-900">{property.title}</h1>
+          <p class="mt-1 text-slate-600">{property.address}</p>
+
+          <div class="mt-6 overflow-hidden rounded-xl border bg-white shadow-sm">
+            <div class="border-b border-slate-100 bg-slate-50 px-5 py-3">
+              <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-600">Price breakdown</h2>
+            </div>
+            <table class="w-full text-sm">
+              <tbody>
+                <tr class="border-b border-slate-100">
+                  <td class="px-5 py-3 text-slate-600">Area</td>
+                  <td class="px-5 py-3 text-right font-medium">{Number(property.area_sqft).toLocaleString('en-IN')} sq ft</td>
+                </tr>
+                <tr class="border-b border-slate-100">
+                  <td class="px-5 py-3 text-slate-600">Rate per sq ft</td>
+                  <td class="px-5 py-3 text-right font-medium">{inr0(property.price_per_sqft)}</td>
+                </tr>
+                <tr>
+                  <td class="px-5 py-3 text-slate-600">Total price</td>
+                  <td class="px-5 py-3 text-right text-lg font-bold text-slate-900">{inr0(property.total_price)}</td>
+                </tr>
+              </tbody>
+            </table>
+            {property.price_overridden === 1 && (
+              <p class="border-t border-slate-100 px-5 py-2 text-xs text-slate-500">
+                Admin-set price — not a direct area &times; rate calculation.
+              </p>
+            )}
+          </div>
+
+          {property.description && (
+            <div class="mt-6">
+              <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-600">Description</h2>
+              <p class="mt-2 whitespace-pre-line text-slate-700">{property.description}</p>
+            </div>
+          )}
+
+          <div class="mt-6">
+            {canApply ? (
+              <form method="post" action="/api/applications" class="rounded-xl border bg-white p-5 shadow-sm">
+                <input type="hidden" name="property_id" value={property.id} />
+                <p class="text-sm text-slate-700">
+                  I confirm I want to apply for <span class="font-semibold">{property.title}</span>. The admin team will
+                  review my application.
+                </p>
+                <button
+                  type="submit"
+                  class="mt-4 w-full rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+                >
+                  Apply for this property
+                </button>
+              </form>
+            ) : existingApp ? (
+              <div class="rounded-xl border bg-white p-5 shadow-sm">
+                <p class="text-sm text-slate-600">Your application status:</p>
+                <div class="mt-2 flex items-center gap-3">
+                  <StatusBadge status={existingApp.status} />
+                  <a href="/dashboard" class="text-sm font-medium text-amber-600 hover:text-amber-700">
+                    Track in Dashboard &rarr;
+                  </a>
+                </div>
+              </div>
+            ) : !user ? (
+              <a
+                href={`/login?next=${nextParam}`}
+                class="block rounded-xl border bg-white p-5 text-center shadow-sm transition-shadow hover:shadow-md"
+              >
+                <span class="text-sm font-semibold text-slate-900">Log in to apply for this property</span>
+                <span class="mt-1 block text-xs text-slate-500">You need an account before you can submit an application.</span>
+              </a>
+            ) : (
+              <div class="rounded-xl border bg-slate-100 p-5 text-sm text-slate-600">
+                This property is currently <span class="font-semibold">{property.status.replace(/-/g, ' ')}</span> and is
+                not open for applications.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )}
+</Base>
