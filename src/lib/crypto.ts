@@ -3,7 +3,14 @@
  * (No node bcrypt — not available on Cloudflare Workers.)
  */
 
-const ITERATIONS = 120_000;
+/**
+ * PBKDF2 iteration count. Cloudflare Workers' WebCrypto REJECTS iteration
+ * counts above 100000 (NotSupportedError) — production signup 500'd at
+ * 120000 on 2026-10-08 while local workerd silently allowed it. Keep this
+ * at or below the platform cap. verifyPassword() reads the count from the
+ * stored hash, so lowering it never breaks existing passwords.
+ */
+export const ITERATIONS = 100_000;
 const SALT_BYTES = 16;
 const KEY_BYTES = 32;
 

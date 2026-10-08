@@ -36,3 +36,12 @@ describe('randomToken', () => {
     expect(/^[A-Za-z0-9_-]+$/.test(a)).toBe(true);
   });
 });
+
+describe('platform limits', () => {
+  it('PBKDF2 iterations stay within the Cloudflare Workers cap (100000)', async () => {
+    // 2026-10-08: production signup 500'd with NotSupportedError at 120000
+    // iterations; local workerd silently allowed it. This guards the cap.
+    const { ITERATIONS } = await import('../src/lib/crypto');
+    expect(ITERATIONS).toBeLessThanOrEqual(100000);
+  });
+});
