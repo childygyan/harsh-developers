@@ -31,7 +31,15 @@ export function adminOrError(context: APIContext): SessionUser | Response {
 }
 
 export function seeOther(location: string, headers?: HeadersInit): Response {
-  return new Response(null, { status: 303, headers: { location, ...(headers || {}) } });
+  // Never spread a Headers instance ({ ...headers } === {}): Headers entries
+  // are not own enumerable properties, so spreading silently drops every
+  // header — including Set-Cookie. That exact bug broke Google login: the
+  // session cookie never reached the browser, so /dashboard bounced back
+  // to /login. new Headers() copies the full header list, preserving
+  // multiple Set-Cookie values.
+  const out = new Headers(headers);
+  out.set('location', location);
+  return new Response(null, { status: 303, headers: out });
 }
 
 /** Redirect back to a form page with an error message. */
